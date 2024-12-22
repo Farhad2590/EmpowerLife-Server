@@ -3,6 +3,8 @@ const cors = require('cors');
 require('dotenv').config();
 
 const port = process.env.PORT || 9000;
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY)
+
 
 const app = express();
 
@@ -35,6 +37,8 @@ async function run() {
     const cuponCollection = client.db('empowerlife').collection('empowerlifeCupons');
     const announcementCollection = client.db('empowerlife').collection('empowerlifeAnnouncements');
     const blogsCollection = client.db('empowerlife').collection('empowerlifeBlogs');
+    const paymentCollection = client.db('empowerlife').collection('empowerlifePayments');
+    const reviewCollection = client.db('empowerlife').collection('empowerlifeReviews');
 
     app.get('/product', async (req, res) => {
       const result = await productCollection.find().toArray();
@@ -54,7 +58,7 @@ async function run() {
     app.delete('/product/:id', async (req, res) => {
       const id = req.params.id;
       console.log(id);
-      
+
       const result = await productCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result)
     });
@@ -79,7 +83,11 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     });
-
+    app.delete('/users/:id', async (req, res) => {
+      const id = req.params.id;
+      const result = await userCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result)
+    });
     app.get('/cart/:email', async (req, res) => {
       const email = req.params.email;
       const result = await cartCollection.find({ userEmail: email }).toArray();
@@ -119,6 +127,15 @@ async function run() {
       }
       res.send({ writer });
     })
+    app.put('/updateUserRole/:email', async (req, res) => {
+      const userEmail = req.params.email;
+      const { role } = req.body;
+      const result = await userCollection.updateOne(
+        { email: userEmail },
+        { $set: { role } }
+      );
+      res.send(result)
+    });
     app.post('/products', async (req, res) => {
       const newProduct = req.body;
       // console.log(newProduct);
@@ -187,10 +204,80 @@ async function run() {
     app.delete('/deleteBlogs/:id', async (req, res) => {
       const id = req.params.id;
       // console.log(id);
-      
+
       const result = await blogsCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result)
     });
+
+    app.get('/payments/:email', async (req, res) => {
+      const email = req.params.email;
+      const result = await paymentCollection.find({ email: email }).toArray();
+      res.status(200).json(result);
+    });
+
+    app.post('/create-payment-intent', async (req, res) => {
+      const { price } = req.body;
+      const amount = parseInt(price * 100);
+      console.log(amount, 'amount inside the intent')
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: 'usd',
+        payment_method_types: ['card']
+      });
+
+      res.send({
+        clientSecret: paymentIntent.client_secret
+      })
+    });
+    app.post('/savePayment', async (req, res) => {
+      const newPayment = req.body;
+      // console.log(newPayment);
+      const result = await paymentCollection.insertOne(newPayment)
+      res.send(result)
+    })
+    app.delete('/cartData', async (req, res) => {
+      const productIds = req.body.productIds;  // Expecting an array of productIds
+
+      if (!productIds || productIds.length === 0) {
+        return res.status(400).send({ message: 'No product IDs provided.' });
+      }
+
+      try {
+        // Assuming you're deleting from cartCollection based on productIds
+        const result = await cartCollection.deleteMany({
+          _id: { $in: productIds.map(id => new ObjectId(id)) } // Convert productIds to ObjectId format
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ message: 'No products found to delete.' });
+        }
+
+        res.send({ message: `${result.deletedCount} product(s) deleted successfully.` });
+      } catch (err) {
+        console.error('Error deleting products:', err);
+        res.status(500).send({ message: 'An error occurred while deleting products.' });
+      }
+    });
+    app.post('/reviews', async (req, res) => {
+      const newPayment = req.body;
+      // console.log(newPayment);
+      const result = await reviewCollection.insertOne(newPayment)
+      res.send(result)
+    })
+    app.get('/allReviews', async (req, res) => {
+      const result = await reviewCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.get('/purchasedProducts/:email', async (req, res) => {
+      const email = req.params.email;
+      const result = await paymentCollection.find({ email: email }).toArray();
+      res.status(200).json(result);
+    });
+
+
+
 
 
     console.log("Connected to MongoDB and server is ready to handle requests!");
